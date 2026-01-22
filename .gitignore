@@ -1,0 +1,13 @@
+# -- Documents --
+DEPLOYMENT.md
+DOCS_INDEX.md
+DOWNLOAD_ISSUE_RESOLVED.md
+PROJECT_COMPLETE.md
+VISUAL_GUIDE.md
+# -- Data files --
+monuments.dat
+.mypy_cache/
+static/
+
+
+

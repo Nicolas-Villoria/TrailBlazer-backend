@@ -1,0 +1,14 @@
+- [DONE] change dijkstra algorithm with A star algorithm (Haversine heuristic)
+- Phase 1 (Data): Update Overpass query to include surface, highway, and landuse tags.
+- Phase 2 (Logic): Modify your Python graphmaker.py to calculate weights based on those tags.
+- Phase 3 (Features): Implement the "Penalty-based Return" logic to allow round-trips.
+- Phase 4 (UI): Add an elevation profile chart below the map. 
+- Phase 5 (Testing & Optimization): Test the new routing logic with various scenarios and optimize performance.
+- implement caching mechanism for frequently requested routes
+- improve user interface for route preferences (e.g., avoid highways, prefer scenic routes)
+- Dockerize the application for easier deployment
+- use spatial data infrastructure: PostGIS
+- advanced scenic routing, based on user preferences between scenic, fast, and balanced routes
+- Task Queues (Celery + Redis): Move to Celery to distribute the heavy graph calculations across multiple worker containers or even different servers.
+- Integrate the route into the map display using Leaflet.js or Mapbox GL JS for better visualization and interactivity.
+- Return XML and GPX formats for routes
