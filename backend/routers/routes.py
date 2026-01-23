@@ -9,18 +9,16 @@ import asyncio
 from pathlib import Path
 
 from models import (
-    RouteRequest,
-    RouteCalculationRequest,
+    CircularRouteRequest,
     JobStartResponse,
     JobResultResponse,
-    BoxModel,
     PointModel
 )
 from services.route_service import RouteService
-from services.graph import GraphService
-from services.segment_service import SegmentService
 from services.monument_service import MonumentService
+from services.graphhopper_service import GraphHopperService
 from database.jobs import JobStorage
+from database.postgres_monuments import PostgresMonumentStorage
 from core.utils import get_logger
 from core.config import STATIC_DIR, DATABASE_CONFIG
 
@@ -29,96 +27,116 @@ router = APIRouter()
 
 # Initialize services
 route_service = RouteService()
-graph_service = GraphService()
-segment_service = SegmentService()
 monument_service = MonumentService()
+pg_storage = PostgresMonumentStorage()
+gh_service = GraphHopperService(pg_storage=pg_storage)
 job_storage = JobStorage(DATABASE_CONFIG["jobs_db_path"])
 
 
-def process_route_calculation(
+def process_circular_route(
     job_id: str,
     start_point: PointModel,
-    monument_type: str,
-    search_box: BoxModel
+    distance_target: float,
+    profile: str,
+    seed: Optional[int]
 ):
-    """Background task for route calculation"""
+    """Background task for circular route calculation via GraphHopper"""
     try:
-        # Update job status to processing
         job_storage.update_job({
             "job_id": job_id,
             "status": "processing",
-            "progress": 0.1,
+            "progress": 0.2,
             "result": None,
             "error": None
         })
         
-        logger.info(f"Job {job_id}: Starting route calculation")
-        
-        # Step 1: Get segments 
-        logger.info(f"Job {job_id}: Downloading/loading segments")
-        segments = segment_service.get_segments(search_box, "segments.txt")
-        job_storage.update_job({
-            "job_id": job_id,
-            "status": "processing",
-            "progress": 0.3,
-            "result": None,
-            "error": None
-        })
-        
-        if not segments:
-            raise Exception("No segments found in the specified area")
-        
-        # Step 2: Build graph 
-        logger.info(f"Job {job_id}: Building graph from {len(segments)} segments")
-        graph = graph_service.make_graph(segments)
-        graph = graph_service.simplify_graph(graph, epsilon=5.0)
-        job_storage.update_job({
-            "job_id": job_id,
-            "status": "processing",
-            "progress": 0.5,
-            "result": None,
-            "error": None
-        })
-        
-        # Step 3: Get monuments
-        logger.info(f"Job {job_id}: Getting monuments of type {monument_type}")
-        monuments = monument_service.get_monuments_by_type_and_area(
-            monument_type=monument_type,
-            bottom_left_lat=search_box.bottom_left.lat,
-            bottom_left_lon=search_box.bottom_left.lon,
-            top_right_lat=search_box.top_right.lat,
-            top_right_lon=search_box.top_right.lon
+        # Step 1: Call GraphHopper
+        logger.info(f"Job {job_id}: Requesting circular route from GraphHopper")
+        gh_response = gh_service.get_pseudo_circular_route(
+            lat=start_point.lat,
+            lon=start_point.lon,
+            distance_target=distance_target,
+            profile=profile,
+            seed=seed
         )
+        
         job_storage.update_job({
             "job_id": job_id,
             "status": "processing",
-            "progress": 0.7,
+            "progress": 0.6,
             "result": None,
             "error": None
         })
         
-        if not monuments:
-            raise Exception(f"No monuments of type {monument_type} found in the area")
+        # Extract geometry (assuming points_encoded=false)
+        path = gh_response["paths"][0]
+        coordinates = path["points"]["coordinates"] # [lon, lat]
         
-        # Step 4: Calculate routes and export 
-        logger.info(f"Job {job_id}: Calculating routes to {len(monuments)} monuments")
-        result = route_service.calculate_and_export(
-            graph=graph,
-            start=start_point,
-            monuments=monuments,
-            box=search_box,
-            job_id=job_id
-        )
-        job_storage.update_job({
+        # Convert to GeoJSON LineString for PostGIS
+        route_geojson = {
+            "type": "LineString",
+            "coordinates": coordinates
+        }
+        
+        # Step 2: Find monuments along route
+        import json
+        logger.info(f"Job {job_id}: Finding monuments along route")
+        # Increase buffer to 500m to catch monuments near the trail
+        raw_monuments = pg_storage.get_monuments_near_route(json.dumps(route_geojson), buffer_m=500)
+        
+        # Format monuments to nested structure expected by frontend
+        nearby_monuments = [
+            {
+                "name": m["name"],
+                "type": m.get("monument_type", "civil"),
+                "location": {
+                    "lat": m["latitude"],
+                    "lon": m["longitude"]
+                }
+            }
+            for m in raw_monuments
+        ]
+        
+        # Step 3: Export files
+        logger.info(f"Job {job_id}: Exporting files")
+        gpx_path = route_service.export_circular_gpx(coordinates, job_id)
+        kml_path = route_service.export_circular_kml(coordinates, job_id)
+        
+        # Use 3D coordinates (lon, lat, elev) for both the map and elevation profile
+        geometry = coordinates
+        
+        result = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coordinates
+                    },
+                    "properties": {
+                        "distance_m": path["distance"],
+                        "time_ms": path["time"],
+                        "ascent": path.get("ascend", 0),
+                        "descent": path.get("descend", 0)
+                    }
+                }
+            ],
+            # Fields expected by the frontend RouteResult interface
+            "geometry": geometry,  # Array of [lon, lat, elev]
+            "distance_km": round(path["distance"] / 1000, 2),
+            "elevation_gain": round(path.get("ascend", 0)),
+            "duration_min": round(path["time"] / (1000 * 60)),
+            "nearby_monuments": nearby_monuments,
+            "gpx_url": f"/static/{Path(gpx_path).relative_to(STATIC_DIR)}",
+            "kml_url": f"/static/{Path(kml_path).relative_to(STATIC_DIR)}",
+            # Additional metadata
             "job_id": job_id,
-            "status": "processing",
-            "progress": 0.95,
-            "result": None,
-            "error": None
-        })
+            "time_ms": path["time"],
+            "ascent": round(path.get("ascend", 0)),
+            "descent": round(path.get("descend", 0))
+        }
         
-        # Step 5: Complete job
-        logger.info(f"Job {job_id}: Route calculation completed")
         job_storage.update_job({
             "job_id": job_id,
             "status": "completed",
@@ -128,7 +146,7 @@ def process_route_calculation(
         })
         
     except Exception as e:
-        logger.error(f"Job {job_id}: Error during route calculation: {e}", exc_info=True)
+        logger.error(f"Job {job_id}: Circular route failed: {e}", exc_info=True)
         job_storage.update_job({
             "job_id": job_id,
             "status": "failed",
@@ -137,56 +155,35 @@ def process_route_calculation(
             "error": str(e)
         })
 
-
-@router.post("/routes/calculate", response_model=JobStartResponse)
-async def calculate_routes(
-    request: RouteCalculationRequest,
+@router.post("/routes/circular", response_model=JobStartResponse)
+async def calculate_circular_route(
+    request: CircularRouteRequest,
     background_tasks: BackgroundTasks
 ):
-    """
-    Calculate routes from a start point to all monuments of a type.
+    """Start circular route calculation"""
+    job_id = str(uuid.uuid4())
+    job_storage.create_job({
+        "job_id": job_id,
+        "status": "pending",
+        "progress": 0.0,
+        "result": None,
+        "error": None
+    })
     
-    This is an async operation that:
-    1. Downloads/loads trail segments
-    2. Builds a graph network
-    3. Finds monuments in the area
-    4. Calculates shortest paths
-    5. Exports PNG and KML files
+    background_tasks.add_task(
+        process_circular_route,
+        job_id=job_id,
+        start_point=request.start_point,
+        distance_target=request.distance_target,
+        profile=request.profile,
+        seed=request.seed
+    )
     
-    Returns a job ID to track progress.
-    """
-    try:
-        # Create job
-        job_id = str(uuid.uuid4())
-        
-        job_storage.create_job({
-            "job_id": job_id,
-            "status": "pending",
-            "progress": 0.0,
-            "result": None,
-            "error": None
-        })
-        
-        logger.info(f"Created route calculation job {job_id}")
-        
-        # Start background task
-        background_tasks.add_task(
-            process_route_calculation,
-            job_id=job_id,
-            start_point=request.start_point,
-            monument_type=request.monument_type,
-            search_box=request.search_box
-        )
-        
-        return JobStartResponse(
-            job_id=job_id,
-            status="pending",
-            message="Route calculation started. Use /routes/job/{job_id} to check progress."
-        )
-        
-    except Exception as e:
-        logger.error(f"Error starting route calculation: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error starting route calculation: {str(e)}")
+    return JobStartResponse(
+        job_id=job_id,
+        status="pending",
+        message="Circular route calculation started."
+    )
 
 
 @router.get("/routes/job/{job_id}", response_model=JobResultResponse)
@@ -220,46 +217,6 @@ async def get_job_status(job_id: str):
         logger.error(f"Error getting job status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting job status: {str(e)}")
 
-
-@router.get("/routes/download/{job_id}/png")
-async def download_png(job_id: str):
-    """
-    Download the PNG map for a completed route calculation job.
-    
-    Returns the PNG file as a downloadable attachment.
-    """
-    try:
-        # Get job to verify it's completed
-        job = job_storage.get_job(job_id)
-        
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-        
-        if job["status"] != "completed":
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Job {job_id} is not completed yet. Current status: {job['status']}"
-            )
-        
-        if not job.get("result") or not job["result"].get("png_file"):
-            raise HTTPException(status_code=404, detail="PNG file not found for this job")
-        
-        png_path = Path(job["result"]["png_file"])
-        
-        if not png_path.exists():
-            raise HTTPException(status_code=404, detail="PNG file no longer exists")
-        
-        return FileResponse(
-            path=str(png_path),
-            media_type="image/png",
-            filename=f"routes_{job_id}.png"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error downloading PNG: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error downloading PNG: {str(e)}")
 
 
 @router.get("/routes/download/{job_id}/kml")
@@ -301,42 +258,3 @@ async def download_kml(job_id: str):
     except Exception as e:
         logger.error(f"Error downloading KML: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error downloading KML: {str(e)}")
-
-
-@router.delete("/routes/job/{job_id}")
-async def delete_job(job_id: str):
-    """
-    Delete a job and its associated files.
-    
-    This will remove the job from the database and delete PNG/KML files if they exist.
-    """
-    try:
-        job = job_storage.get_job(job_id)
-        
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-        
-        # Delete files if they exist
-        if job.get("result"):
-            if job["result"].get("png_file"):
-                png_path = Path(job["result"]["png_file"])
-                if png_path.exists():
-                    png_path.unlink()
-                    logger.info(f"Deleted PNG file: {png_path}")
-            
-            if job["result"].get("kml_file"):
-                kml_path = Path(job["result"]["kml_file"])
-                if kml_path.exists():
-                    kml_path.unlink()
-                    logger.info(f"Deleted KML file: {kml_path}")
-        
-        # Note: JobStorage doesn't have delete method, so we can't delete from DB
-        # In a production system, you'd implement this
-        
-        return {"message": f"Job {job_id} files deleted successfully"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting job: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error deleting job: {str(e)}")

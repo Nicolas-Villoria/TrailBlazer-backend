@@ -4,11 +4,14 @@ Main FastAPI application - Clean and modular
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from core.config import API_CONFIG, STATIC_DIR, DATABASE_CONFIG
 from core.utils import get_logger
 from database.jobs import JobStorage
-from routers import monuments, routes, segments
+from routers import monuments, routes
 
 import uvicorn
 from datetime import datetime
@@ -45,7 +48,6 @@ job_storage = JobStorage(DATABASE_CONFIG["jobs_db_path"])
 # Include routers
 app.include_router(monuments.router, tags=["monuments"])
 app.include_router(routes.router, tags=["routes"])
-app.include_router(segments.router, tags=["segments"])
 
 
 @app.get("/")

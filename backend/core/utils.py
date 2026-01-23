@@ -11,8 +11,7 @@ from typing import Optional, Dict, Any
 import numpy as np
 from scipy.spatial import KDTree
 
-from core.config import SKELETON_DIR
-from models import JobStatus
+# SKELETON_DIR and skeleton_working_directory removed
 
 # Configure logging
 logging.basicConfig(
@@ -20,8 +19,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        # In production, add FileHandler for persistent logs
-        # logging.FileHandler('trailblazer.log'),
     ]
 )
 
@@ -29,21 +26,6 @@ logging.basicConfig(
 def get_logger(name: str) -> logging.Logger:
     """Get a logger instance for a module"""
     return logging.getLogger(f"trailblazer.{name}")
-
-
-@contextmanager
-def skeleton_working_directory():
-    """Context manager to safely change to skeleton directory for skeleton functions"""
-    # Get thread-local storage for original directory
-    if not hasattr(threading.current_thread(), '_original_cwd'):
-        threading.current_thread()._original_cwd = os.getcwd()
-    
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(str(SKELETON_DIR))
-        yield
-    finally:
-        os.chdir(original_cwd)
 
 
 def find_closest_node_efficient(graph, target_point):
@@ -63,7 +45,6 @@ def find_closest_node_efficient(graph, target_point):
     distance, index = tree.query(target_coords)
     
     # Convert distance from coordinate units to km using approximate conversion
-    # Note: This is approximate. For precise distance, we'd use haversine
     distance_km = distance * 111.32  # Rough conversion: 1 degree ≈ 111.32 km
     
     return nodes[index], distance_km
@@ -81,11 +62,11 @@ def update_job_progress(
     job = job_storage.get_job(job_id)
     if job:
         if status is not None:
-            job.status = status
+            job["status"] = status
         if progress is not None:
-            job.progress = progress
+            job["progress"] = progress
         if result is not None:
-            job.result = result
+            job["result"] = result
         if error is not None:
-            job.error = error
+            job["error"] = error
         job_storage.update_job(job)

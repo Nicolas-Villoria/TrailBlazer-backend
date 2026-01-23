@@ -27,16 +27,10 @@ from .monuments import (
 from .routes import (
     RouteRequest,
     RouteResponse,
-    RouteCalculationRequest
+    RouteCalculationRequest,
+    CircularRouteRequest
 )
 
-# Segment models
-from .segments import (
-    SegmentResponse,
-    SegmentPreviewResponse,
-    SegmentRequest,
-    SegmentListResponse
-)
 
 # Job models
 from .jobs import (
@@ -88,6 +82,7 @@ __all__ = [
     "RouteRequest",
     "RouteResponse",
     "RouteCalculationRequest",
+    "CircularRouteRequest",
     
     # Segments
     "SegmentResponse",

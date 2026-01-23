@@ -32,3 +32,11 @@ class RouteCalculationRequest(BaseModel):
     max_monuments: Optional[int] = None
     optimization_mode: Optional[str] = "shortest"  # "shortest", "most_monuments", "balanced"
     settings: Optional[Dict[str, Any]] = None
+
+
+class CircularRouteRequest(BaseModel):
+    """Request to calculate a circular route"""
+    start_point: PointModel
+    distance_target: float
+    profile: str = "foot"
+    seed: Optional[int] = None

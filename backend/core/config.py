@@ -4,10 +4,9 @@ Application configuration and constants
 import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
-# Add the skeleton directory to the Python path
-SKELETON_DIR = Path(__file__).parent.parent.parent.parent / "skeleton"
-sys.path.insert(0, str(SKELETON_DIR))
+load_dotenv()
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent.parent / "static"

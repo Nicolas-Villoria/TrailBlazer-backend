@@ -8,6 +8,12 @@ VISUAL_GUIDE.md
 monuments.dat
 .mypy_cache/
 static/
+backend/monuments.db
+backend/jobs.db
+backend/migrate_monuments.py
+backend/init_db.py
+
+backend/.env
 
 
 
