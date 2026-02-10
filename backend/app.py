@@ -17,6 +17,8 @@ import uvicorn
 from datetime import datetime
 from models import HealthResponse
 from models import ApiInfoResponse
+import os
+
 
 
 
@@ -33,7 +35,10 @@ app = FastAPI(
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=[
+        os.getenv("FRONTEND_URL", "http://localhost:3000"),
+        "http://localhost:5173",  
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
