@@ -32,18 +32,26 @@ app = FastAPI(
     description=API_CONFIG["description"]
 )
 
-# Enable CORS
+# Enable CORS with regex for Vercel previews
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         os.getenv("FRONTEND_URL", "http://localhost:3000"),
-        "http://localhost:5173",  # Vite dev
-        "https://trailblazer-pnlusbnkv-nicolas-villorias-projects.vercel.app" # Current preview
+        "http://localhost:5173",
     ],
+    allow_origin_regex=r"https://trailblazer.*\.vercel\.app",  # Matches any Vercel deploy
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """Log incoming requests and their origin"""
+    origin = request.headers.get("origin")
+    print(f"DEBUG: Incoming request from Origin: {origin} | Path: {request.url.path}")
+    response = await call_next(request)
+    return response
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
