@@ -32,17 +32,25 @@ app = FastAPI(
     description=API_CONFIG["description"]
 )
 
-# Enable CORS
+# Enable CORS - temporarily allow ALL for debugging
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+print(f"DEBUG: FRONTEND_URL is set to: '{frontend_url}'")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv("FRONTEND_URL", "http://localhost:3000"),
-        "http://localhost:5173",  
-    ],
+    allow_origins=["*"],  # Allow ALL origins to debug 400 Bad Request
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """Log incoming requests and their origin"""
+    origin = request.headers.get("origin")
+    print(f"DEBUG: Incoming request from Origin: {origin} | Path: {request.url.path}")
+    response = await call_next(request)
+    return response
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
