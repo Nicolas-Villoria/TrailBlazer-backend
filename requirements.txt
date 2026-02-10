@@ -9,4 +9,5 @@ pydantic==2.5.0
 psycopg2-binary==2.9.9
 python-dotenv==1.0.1
 numpy<2.0
+scipy
 python-jose==3.3.0
